@@ -35,6 +35,7 @@ class Sound(object):
     def __init__(self, device=str()):
         super(Sound, self).__init__()
         self.loop = False
+        self.ret = None
 
         count = Sound.count
         Sound.count += 1
@@ -127,6 +128,7 @@ class Sound(object):
 
     def play(self):
         ret = self.player.set_state(Gst.State.PLAYING)
+        self.ret = ret
         if ret == Gst.StateChangeReturn.FAILURE:
             rospy.logerr("Failed to play %s" % self.uri)
             return False
@@ -286,7 +288,13 @@ class SoundPlayNode(object):
         result = SoundRequestResult()
         result.playing = False
         result.stamp = rospy.Time.now() - start
-        self.server.set_succeeded(result)
+        if sound.ret is not None:
+            if sound.ret == Gst.StateChangeReturn.FAILURE:
+                self.server.set_aborted()
+            else:
+                self.server.set_succeeded(result)
+        else:
+            self.server.set_aborted()
 
     def timer_cb(self, event):
         remove = list()
