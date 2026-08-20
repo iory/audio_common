@@ -323,6 +323,16 @@ class SoundPlayNode(object):
             self.mutex.release()
             rospy.logdebug("done actionlib callback")
 
+    def _publish_reference(self, data):
+        # Called from the GStreamer thread; rospy publishers are thread-safe.
+        if self.pub_reference is None:
+            return
+        try:
+            from audio_common_msgs.msg import AudioData
+            self.pub_reference.publish(AudioData(data=data))
+        except Exception as exc:                    # noqa: BLE001
+            rospy.logwarn_throttle(10.0, "reference publish failed: %s", exc)
+
     def __init__(self):
         Gst.init(None)
 
@@ -335,6 +345,22 @@ class SoundPlayNode(object):
         rospy.init_node('sound_play')
         self.loop_rate = rospy.get_param('~loop_rate', 100)
         self.device = rospy.get_param("~device", "default")
+
+        # Publish a copy of whatever is played, for an echo canceller to use as
+        # its reference. Taken from inside the playback pipeline rather than
+        # from the sound card's monitor: the monitor is scheduled by the sink
+        # and delivers only a fraction of the samples a canceller needs, and it
+        # is never quite silent when nothing is playing. This is silent exactly
+        # when the robot is.
+        self.pub_reference = None
+        if rospy.get_param("~publish_reference", False):
+            from audio_common_msgs.msg import AudioData
+            self.pub_reference = rospy.Publisher(
+                "~playback_audio", AudioData, queue_size=32)
+            SoundType.reference_cb = self._publish_reference
+            rospy.loginfo(
+                "publishing playback audio on %s (16 kHz mono s16) for echo "
+                "cancellation", rospy.resolve_name("~playback_audio"))
         self.default_voice = rospy.get_param('~default_voice', None)
         self.plugin_name = rospy.get_param(
             '~plugin', 'sound_play/festival_plugin')
